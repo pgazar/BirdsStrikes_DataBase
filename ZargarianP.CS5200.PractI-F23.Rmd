@@ -1,0 +1,597 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+----------------------------
+title: "Practicum I CS5200"
+Author: Pegah Zargarian
+Date: Fall 2023
+output:
+  html_document:
+    df_print: paged
+----------------------------
+## Connect to Database
+```{r Library&connection, eval = T, warning = F} 
+# Load the library
+library(RMySQL)
+library(DBI)
+
+
+dbcon <- dbConnect(MySQL(), 
+                 dbname = 'sql3653854', 
+                 user = '', 
+                 password = '', 
+                 host = 'sql3.freemysqlhosting.net')
+
+```
+
+```{sql dropStrikes,connection=dbcon, echo = FALSE}
+DROP TABLE strikes
+
+```
+
+```{sql dropConditions,connection=dbcon, echo = FALSE}
+DROP TABLE conditions
+
+```
+
+```{sql dropFlights,connection=dbcon, echo = FALSE}
+DROP TABLE flights
+```
+
+```{sql dropAirports,connection=dbcon, echo = FALSE}
+DROP TABLE airports
+```
+
+
+```{sql  dropStrikesview,connection=dbcon, echo = FALSE}
+DROP View IF EXISTS strikesView 
+```
+
+```{sql  dropFview,connection= dbcon, echo = FALSE}
+DROP VIEW IF EXISTS flightsView
+```
+
+## Create Database
+```{sql airports, connection=dbcon}
+CREATE TABLE IF NOT EXISTS airports (
+    aid INT PRIMARY KEY NOT NULL,
+    airportName VARCHAR(100),
+    /*origin in CSV */
+    airportState VARCHAR(50),
+    airportCode VARCHAR(50) 
+);
+
+```
+
+```{sql flights, connection = dbcon}
+CREATE TABLE  IF NOT EXISTS flights(
+  fid INTEGER PRIMARY KEY NOT NULL,
+  flight_date DATE,
+  origin_aid INTEGER,
+  airline VARCHAR(100),
+  aircraft VARCHAR(50),
+  heavy TINYINT(1), 
+  FOREIGN KEY (origin_aid) REFERENCES airports(aid)
+  );
+
+
+```
+
+```{sql flightsView, connection=dbcon}
+CREATE VIEW flightsView AS
+SELECT
+  fid,
+  flight_date,
+  origin_aid,
+  airline,
+  aircraft,
+  CASE
+    WHEN heavy = 1 THEN 'TRUE'
+    ELSE 'FALSE'
+  END AS heavy
+FROM flights;
+ 
+```
+
+
+```{sql conditions,connection= dbcon}
+CREATE TABLE IF NOT EXISTS conditions(
+    cid INT PRIMARY KEY NOT NULL,
+    sky_condition VARCHAR(50) UNIQUE,
+    explanation TEXT
+    
+);
+
+```
+
+
+```{sql strikes,connection=dbcon}
+CREATE TABLE IF NOT EXISTS strikes(
+    sid INT PRIMARY KEY NOT NULL,
+    numbirds INT,
+    impact TEXT,
+    damage TINYINT(1), 
+    altitude INT CHECK (altitude >= 0), 
+    conditions_id INT,
+    fid INT,
+    FOREIGN KEY (conditions_id) REFERENCES conditions(cid),
+    FOREIGN KEY (fid) REFERENCES flights(fid)
+  
+);
+
+```
+
+```{sql strikesView, connection = dbcon}
+CREATE VIEW strikesView AS
+SELECT
+    sid,
+    numbirds,
+    impact,
+    CASE
+        WHEN damage= 1 THEN 'TRUE'
+        ELSE 'FALSE'
+    END AS damage,
+    altitude,
+    conditions_id,
+    fid
+FROM strikes;
+
+```
+
+
+```{sql,  insertAirport, connection=dbcon, echo = FALSE}
+INSERT INTO airports (aid, airportName, airportState, airportCode)
+VALUES
+    (123, 'LaGuardia', 'NY', 'LGA'),
+    (456, 'Another Airport', 'CA', 'XYZ');
+```
+
+```{sql  showAirport, connection=dbcon, eval= FALSE, echo = FALSE}
+SELECT * FROM airports
+```
+
+
+```{sql insertCondition, connection=dbcon, echo = FALSE}
+
+# Test Code 
+INSERT INTO conditions (cid, sky_condition, explanation) VALUES
+    (1, 'Overcast', 'Explanation for Overcast'),
+    (2, 'Some Cloud', 'Explanation for Some Cloud'),
+    (3, 'No Cloud', 'Explanation for No Cloud');
+    
+```
+
+```{sql showConditionTest, connection=dbcon, eval= FALSE,echo = FALSE}
+SELECT * FROM conditions
+```
+
+```{sql  insertFlights, connection=dbcon, echo = FALSE}
+
+INSERT INTO flights (fid, flight_date, origin_aid, airline, aircraft, heavy)
+VALUES (101, '2023-10-20', 123, 'Some Airline', 'HeavyPlane123', TRUE),
+       (102, '2023-10-21', 456, 'Another Airline', 'LightPlane456',FALSE);
+
+
+```
+
+```{sql  showFlightsTest, connection=dbcon,eval= FALSE, echo = FALSE}
+SELECT * FROM flights
+```
+
+```{sql,  insertStrikes, connection=dbcon, echo = FALSE}
+INSERT INTO strikes (sid,  numbirds, impact, damage,altitude, conditions_id,fid)
+VALUES (1, 5, 'Windshield', 1, 5000, 1,101),  
+       (2, 3, 'Engine', 0, 3000, 2,102); 
+```
+
+
+```{sql  showStrikesTest,connection=dbcon, eval= FALSE, echo = FALSE}
+SELECT * FROM strikes
+```
+
+
+```{sql deleteStrikes, connection=dbcon, echo = FALSE}
+DELETE FROM strikes
+```
+
+```{sql  deleteFlights, connection=dbcon, echo = FALSE}
+DELETE FROM flights;
+```
+
+```{sql deleteCondition, connection=dbcon, echo = FALSE}
+-- DELETE FROM conditions
+DELETE FROM conditions;
+``` 
+
+```{sql,  deleteAirport, connection=dbcon, echo = FALSE}
+DELETE FROM airports;
+```
+
+
+
+```{r handleNa, eval = T, warning = F} 
+bds.raw <- read.csv("BirdStrikesData-V2.csv")
+# Specify the columns to handle missing values
+columns_to_handle <- c("aircraft",  "airport","impact", "airline" ,"origin","sky_conditions")
+
+# Loop through each column and replace missing values
+for (col in columns_to_handle) {
+  bds.raw[[col]][is.na(bds.raw[[col]]) | bds.raw[[col]] == ""] <- "Unknown"
+}
+bds.raw$altitude_ft[is.na(bds.raw$altitude_ft) | bds.raw$altitude_ft ==""] <- 0
+
+
+
+```
+
+```{sql connection=dbcon}
+SELECT * FROM airports WHERE airportState =NULL;
+```
+
+```{sql connection=dbcon}
+SELECT * FROM flights WHERE flight_date = NULL;
+```
+```{sql connection=dbcon}
+SELECT * FROM strikes WHERE altitude = NULL;
+```
+
+```{r aiportDF, eval = T, warning = F} 
+# airports
+# Creating a new data frame with the columns needed
+n.flights <- nrow(bds.raw)
+airports_subset_df<- data.frame(
+  aid = 100 + seq(1,n.flights),
+  airportName = bds.raw$airport,
+  airportState = bds.raw$origin,
+  airportCode = ""
+)
+
+# Bulk insert into the 'flights' table without the 'origin' column
+dbWriteTable(dbcon, "airports", airports_subset_df, row.names = FALSE, append = TRUE)
+
+
+
+```
+
+```{r conditionDF, eval = T, warning = F} 
+#conditions
+# Creating a new data frame with the columns needed
+n.conditions <- nrow(bds.raw)
+conditions_df <- data.frame(
+  cid = 100 + seq(1,n.conditions),
+  sky_condition = bds.raw$sky_conditions,
+  explanation =""
+)
+
+
+dbWriteTable(dbcon, "conditions", conditions_df , row.names = FALSE, append = TRUE)
+
+```
+```{r flightsDF, eval = T, warning = F} 
+#flights
+# Assuming you have the aid values from the airports_subset_df
+airports_aid <- airports_subset_df$aid
+
+# Creating a new data frame with the columns needed
+n.flights <- nrow(bds.raw)
+flights_df <- data.frame(
+  fid = bds.raw$rid,
+  flight_date = as.Date(bds.raw$flight_date, format = "%m/%d/%Y %H:%M"),
+  airline = bds.raw$airline,
+  aircraft = bds.raw$aircraft,
+  origin_aid = 0,  # Placeholder for foreign key
+  heavy =  ifelse(bds.raw$heavy_flag == 'Yes', 1, 0)
+)
+
+# Match airline and airportState to find the corresponding aid
+for (r in 1:n.flights) {
+  match_idx <- which(airports_subset_df$airportState == bds.raw$origin[r] &
+                     airports_subset_df$airportName == bds.raw$airport[r])
+  
+  if (length(match_idx) > 0) {
+    flights_df$origin_aid[r] <- airports_aid[match_idx[1]]
+  }
+}
+
+# Bulk insert into the 'strikes' 
+dbWriteTable(dbcon, "flights", flights_df, row.names = FALSE, append= TRUE)
+
+
+```
+
+```{sql connection=dbcon}
+UPDATE flights
+SET flight_date = '1900-01-01'
+WHERE flight_date IS NULL;
+
+```
+
+
+```{r strikesDF, eval = T, warning = F} 
+#strikes
+
+# Creating a new data frame with the columns needed
+n.flights <- nrow(bds.raw)
+strikes_df <- data.frame(
+  sid = 10000 + seq(1,n.flights),
+  numbirds = bds.raw$wildlife_struck,
+  damage = ifelse(bds.raw$damage == 'Caused damage', 1, 0),
+  impact = bds.raw$impact,
+  altitude = bds.raw$altitude_ft,
+  conditions_id = 0,
+  fid = 0
+)
+
+
+# Match airline and airportState to find the corresponding aid
+for (r in 1:n.flights)   { 
+  conditionsRow <- conditions_df$cid[which(conditions_df$sky_condition==bds.raw$sky_conditions[r])] 
+  strikes_df$conditions_id[r] <- conditionsRow   }
+
+flightDate <- as.Date(bds.raw$flight_date, format = "%m/%d/%Y")
+for (r in 1:n.flights) {
+  fidRow <- flights_df$fid[which(flights_df$fid == bds.raw$rid[r])]
+  strikes_df$fid[r] <- fidRow
+} 
+  
+
+# Bulk insert into the 'strikes' 
+dbWriteTable(dbcon, "strikes", strikes_df, row.names = FALSE, append = TRUE)
+
+
+```
+
+
+```{sql airportShow,connection=dbcon}
+SELECT * FROM airports
+LIMIT 5;
+
+```
+
+
+```{sql conditionsShow,connection=dbcon}
+SELECT * FROM conditions
+LIMIT 5;
+
+```
+
+
+
+```{sql showflights,connection=dbcon}
+SELECT * FROM flightsView
+LIMIT 5;
+```
+
+```{sql  showStrikes, connection=dbcon}
+SELECT * FROM strikesView
+LIMIT 5;
+```
+
+
+
+```{sql Question 8, connection=dbcon }
+SELECT
+    a.airportState AS state,
+    COUNT(*) AS numbirds 
+FROM
+    strikes s
+JOIN
+    flights f ON s.fid = f.fid
+JOIN
+    airports a ON f.origin_aid = a.aid
+GROUP BY
+    a.airportState
+ORDER BY
+    numbirds DESC
+LIMIT 10;
+
+
+```
+
+
+```{sql  Question 9 ,connection=dbcon}
+SELECT f.airline as airline, COUNT(s.sid) as num_of_strikes
+FROM flights AS f JOIN strikes AS s ON f.fid = s.fid
+GROUP BY f.airline HAVING num_of_strikes > (SELECT AVG(incident_count)
+FROM (SELECT count(*) as incident_count FROM strikes
+GROUP BY fid) AS average_incidents)
+ORDER BY num_of_strikes DESC;
+
+```
+
+```{sql  Question10,  output.var="df.strikesByMonth",connection=dbcon}
+
+SELECT
+    MONTH(f.flight_date) AS month,
+     SUM(s.numbirds) AS total_birds
+FROM
+    strikes s
+JOIN
+    flights f ON s.fid = f.fid
+GROUP BY
+    month;
+
+```
+
+
+
+```{r strikesByMonthShow, eval = T, warning = F}
+
+head(df.strikesByMonth)
+
+```
+
+```{r strikesByMonthPlot,eval = T, warning = F}
+
+barplot(df.strikesByMonth$total_birds, 
+        names.arg = df.strikesByMonth$month, 
+        xlab = "Month", ylab = "Number of Birds",
+        main = "Number of Birds Striking Aircraft by Month",
+        col = "skyblue")
+
+# Adding data labels
+text(x = barplot(df.strikesByMonth$total_birds, col = "skyblue", plot = FALSE),
+     y = df.strikesByMonth$total_birds + 5,  # Adjust the 5 for proper positioning
+     labels = df.strikesByMonth$total_birds, pos = 1)
+
+# Adding a legend-like text annotation
+legend("topright", legend = "Total number of birds striking aircraft",
+       fill = "skyblue", bty = "n", cex = 0.65)
+
+```
+
+```{sql drop procedure, connection=dbcon}
+DROP PROCEDURE IF EXISTS addStrike;
+
+```
+
+```{sql storedProcedure, connection = dbcon}
+
+CREATE PROCEDURE addStrike(
+  IN sp_numBirds INT,
+  IN sp_impact TEXT,
+  IN sp_altitude INT,
+  IN sp_fid INT,
+  IN sp_flight_date DATE,
+  IN sp_airline VARCHAR(100),
+  IN sp_aircraft VARCHAR(50),
+  IN sp_airportName VARCHAR(100),
+  IN sp_airportState VARCHAR(50),
+  IN sp_skyCondition VARCHAR(50),
+  IN sp_heavy TINYINT(1),
+  IN sp_damage TINYINT(1)
+)
+BEGIN
+  DECLARE fid_procedure INT DEFAULT NULL;
+  DECLARE aid_procedure INT DEFAULT NULL;
+  DECLARE cid_procedure INT DEFAULT NULL;
+  DECLARE sid_procedure INT DEFAULT NULL;
+  DECLARE aid_max INT DEFAULT NULL;
+  DECLARE fid_max INT DEFAULT NULL;
+  DECLARE cid_max INT DEFAULT NULL;
+  DECLARE sid_max INT DEFAULT NULL;
+
+  IF sp_airportState IS NOT NULL THEN
+    SELECT aid INTO aid_procedure FROM airports 
+    WHERE airportState = sp_airportState AND airportName = sp_airportName;
+    /* If the airportState does not exist, insert it and grab the aid */
+    IF aid_procedure IS NULL THEN
+      SELECT COALESCE(MAX(aid), 1) INTO aid_max FROM airports;
+      SET aid_procedure = aid_max + 1;
+      INSERT INTO airports (aid, airportName, airportState) 
+      VALUES (aid_procedure, sp_airportName, sp_airportState);
+    END IF;
+  END IF;
+ 
+  /* Check if a skyCondition exists */
+  IF sp_skyCondition IS NOT NULL THEN
+    SELECT cid INTO cid_procedure FROM conditions WHERE sky_condition = sp_skyCondition;
+    /* Handle if the cid doesn't exist */
+    IF cid_procedure IS NULL THEN
+      SELECT COALESCE(MAX(cid), 1) INTO cid_max FROM conditions;
+      SET cid_procedure = cid_max + 1;
+      INSERT INTO conditions (cid, sky_condition) VALUES (cid_procedure, sp_skyCondition);
+    END IF;
+  END IF;
+
+  /* Check if the fid already exists */
+  IF sp_fid IS NOT NULL THEN
+    SELECT fid INTO fid_procedure FROM flights WHERE fid = sp_fid;
+    /* Handle if fid doesn't exist */
+    IF fid_procedure IS NULL THEN
+      SELECT COALESCE(MAX(fid), 1) INTO fid_max FROM flights;
+      SET fid_procedure = fid_max + 1;
+      INSERT INTO flights (fid, flight_date, aircraft, airline, origin_aid, heavy) 
+      VALUES (fid_procedure, sp_flight_date, sp_aircraft,
+      UPPER(sp_airline), aid_procedure, sp_heavy);
+    END IF;
+  END IF;
+
+  /* Check if sid_procedure exists */
+  IF fid_procedure IS NOT NULL AND cid_procedure IS NOT NULL 
+  AND sid_procedure IS NOT NULL THEN
+    SELECT sid INTO sid_procedure FROM strikes
+    WHERE fid = sp_fid AND cid = cid_procedure;
+    /* Handle if sid doesn't exist */
+    IF sid_procedure IS NULL THEN
+      SELECT COALESCE(MAX(sid), 1) INTO sid_max FROM strikes;
+      SET sid_procedure = sid_max + 1;
+      INSERT INTO strikes (sid, numbirds, damage, impact, altitude, cid, fid)
+      VALUES (sid_procedure, sp_numBirds, sp_damage,
+      sp_impact, sp_altitude, cid_procedure, fid_procedure);
+    END IF;
+  END IF;
+
+END;
+
+```
+
+
+
+
+```{r ,eval = T, warning = F} 
+
+# Test Case 1: Insert a New Bird Strike with New Airport and New Flight
+dbSendQuery(dbcon, "
+  CALL addStrike(
+    8, 'Tail damage', 30, NULL, '2023-10-25', 'Delta Airlines', 'Airplane XYZ',
+    'ABC Airport', 'XYZ State', 'Some Clouds', 'Yes', 'Caused damage'
+  )
+")
+
+# Test Case 2: Insert a New Bird Strike with Existing Airport and Existing Flight
+dbSendQuery(dbcon, "
+  CALL addStrike(
+    5, 'Wing damage', 25, 101, '2023-10-26', 'American Airlines', 'Airplane ABC',
+    'MNO Airport', 'PQRS State', 'Clear', 'No', 'No damage'
+  )
+")
+
+# Test Case 3: Insert a New Bird Strike with Existing Airport and New Flight
+dbSendQuery(dbcon, "
+  CALL addStrike(
+    7, 'Engine shutdown', 28, NULL, '2023-10-27', 'United Airlines', 'Airplane XYZ',
+    'ABC Airport', 'XYZ State', 'Overcast', 'Yes', 'Caused damage'
+  )
+")
+
+# Test Case 4: Insert a New Bird Strike with New Airport and Existing Flight
+dbSendQuery(dbcon, "
+  CALL addStrike(
+    6, 'Fuselage damage', 22, 102, '2023-10-28', 'Delta Airlines', 'Airplane XYZ',
+    'New Airport', 'New State', 'Some Clouds', 'No', 'No damage'
+  )
+")
+
+
+```
+```{sql connection=dbcon}
+SELECT * FROM flights
+WHERE airline = 'Delta Airlines'
+
+```
+
+```{sql connection=dbcon}
+SELECT * FROM flights
+WHERE flight_date = '2023-10-26'
+
+```
+```{sql connection=dbcon}
+SELECT * FROM airports
+WHERE airportName = "ABC Airport"
+
+```
+
+```{sql connection=dbcon}
+SELECT * FROM airports
+WHERE airportName = "New Airport"
+
+```
+
+
+```{r}
+dbDisconnect(dbcon)
+```
+
